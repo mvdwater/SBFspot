@@ -55,6 +55,7 @@ private:
     void exportDayData();
     void exportMonthData();
     void exportEventData(const std::string& dt_range_csv);
+    void exportEventDataMqtt();
 
     void disconnect();
 

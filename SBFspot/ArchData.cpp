@@ -396,15 +396,15 @@ E_SBFSPOT ArchiveMonthData(InverterData *inverters[], tm *start_tm)
     return E_OK;
 }
 
-E_SBFSPOT ArchiveEventData(InverterData *inverters[], boost::gregorian::date startDate, unsigned long UserGroup)
+// Internal implementation: fetch events for a given time window and user group.
+// Called by both the public ArchiveEventData (month window) and
+// ArchiveInstallerEventsToday (single-day window).
+static E_SBFSPOT ArchiveEventData_impl(InverterData *inverters[], time_t startTime, time_t endTime, unsigned long UserGroup)
 {
     E_SBFSPOT rc = E_OK;
 
     unsigned short pcktcount = 0;
     bool validPcktID = false;
-
-    time_t startTime = to_time_t(startDate);
-    time_t endTime = startTime + 86400 * startDate.end_of_month().day();
 
     for (uint32_t inv = 0; inverters[inv] != NULL && inv<MAX_INVERTERS; inv++)
     {
@@ -483,6 +483,27 @@ E_SBFSPOT ArchiveEventData(InverterData *inverters[], boost::gregorian::date sta
     }
 
     return rc;
+}
+
+// Public API: fetch events for a full calendar month.
+E_SBFSPOT ArchiveEventData(InverterData *inverters[], boost::gregorian::date startDate, unsigned long UserGroup)
+{
+    time_t startTime = to_time_t(startDate);
+    time_t endTime = startTime + 86400 * startDate.end_of_month().day();
+    return ArchiveEventData_impl(inverters, startTime, endTime, UserGroup);
+}
+
+// Fetch only today's events for the installer user group, using a 24-hour UTC
+// window. Intended for frequent polling runs where a full month fetch would be
+// wasteful over Bluetooth.
+E_SBFSPOT ArchiveInstallerEventsToday(InverterData *inverters[])
+{
+    boost::posix_time::ptime tm_utc(boost::posix_time::from_time_t(time(nullptr)));
+    boost::gregorian::date dt_today(tm_utc.date().year(), tm_utc.date().month(), tm_utc.date().day());
+    time_t startTime = to_time_t(dt_today);
+    time_t endTime = startTime + 86400;
+
+    return ArchiveEventData_impl(inverters, startTime, endTime, UG_INSTALLER);
 }
 
 E_SBFSPOT getMonthDataOffset(InverterData *inverters[])

@@ -40,6 +40,7 @@ DISCLAIMER:
 
 struct Config;
 struct InverterData;
+class TagDefs;
 
 class MqttExport
 {
@@ -48,10 +49,12 @@ public:
     ~MqttExport();
 
     int exportInverterData(const std::vector<InverterData>& inverterData);
+    int exportEventData(InverterData* const* const inverters, TagDefs& tagdefs);
 
 private:
     const Config& m_config;
 
     std::string to_keyvalue(const std::string key, const std::string value) const;
     time_t to_time_t(float time_f);
+    std::string escapeJson(const std::string& s) const;
 };

@@ -734,6 +734,9 @@ void Inverter::exportSpotData()
             std::cout << "Error " << rc << " while publishing to MQTT Broker" << std::endl;
         }
     }
+
+    if (m_config.mqttInstallerEvents)
+        exportEventDataMqtt();
 }
 
 void Inverter::exportDayData()
@@ -767,6 +770,44 @@ void Inverter::exportEventData(const std::string& dt_range_csv)
     if ((!m_config.nosql) && m_db.isopen())
         m_db.exportEventData(m_inverters, tagdefs);
 #endif
+
+    if (m_config.mqtt)
+    {
+        MqttExport mqtt(m_config);
+        auto rc = mqtt.exportEventData(m_inverters, tagdefs);
+        if (rc != 0)
+            std::cout << "Error " << rc << " while publishing events to MQTT Broker" << std::endl;
+    }
+}
+
+void Inverter::exportEventDataMqtt()
+{
+    if (m_config.userGroup != UG_INSTALLER)
+    {
+        std::cout << "Warning: -mqttevents requires installer login. No events will be published via MQTT." << std::endl;
+        return;
+    }
+
+    if (!m_config.mqtt)
+    {
+        std::cout << "Warning: -mqttevents has no effect without -mqtt." << std::endl;
+        return;
+    }
+
+    if (VERBOSE_LOW)
+        std::cout << "Fetching today's installer events for MQTT..." << std::endl;
+
+    E_SBFSPOT rc = ArchiveInstallerEventsToday(m_inverters);
+    if (rc != E_OK && rc != E_EOF)
+    {
+        std::cout << "ArchiveInstallerEventsToday returned an error: " << rc << std::endl;
+        return;
+    }
+
+    MqttExport mqtt(m_config);
+    auto mqttRc = mqtt.exportEventData(m_inverters, tagdefs);
+    if (mqttRc != 0)
+        std::cout << "Error " << mqttRc << " while publishing events to MQTT Broker" << std::endl;
 }
 
 std::vector<InverterData> Inverter::toStdVector(InverterData* const* const inverters)

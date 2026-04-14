@@ -1156,6 +1156,7 @@ int parseCmdline(int argc, char **argv, Config *cfg)
     cfg->settime = false;
     cfg->settime2 = false;
     cfg->mqtt = false;
+    cfg->mqttInstallerEvents = false;
     cfg->decode_file = false;
 
     bool help_requested = false;
@@ -1463,6 +1464,9 @@ int parseCmdline(int argc, char **argv, Config *cfg)
         else if (stricmp(argv[i], "-mqtt") == 0)
             cfg->mqtt = true;
 
+        else if (stricmp(argv[i], "-mqttevents") == 0)
+            cfg->mqttInstallerEvents = true;
+
         //Show Help
         else if (stricmp(argv[i], "-?") == 0)
         {
@@ -1544,6 +1548,7 @@ void SayHello(int ShowHelp)
         std::cout << " -startdate:YYYYMMDD Set start date for historic data retrieval\n";
         std::cout << " -settime            Sync inverter time with host time\n";
         std::cout << " -mqtt               Publish spot data to MQTT broker\n";
+        std::cout << " -mqttevents         Fetch today's installer events and publish via MQTT (no DB write)\n";
         std::cout << " -version            Show SBFspot version number\n";
 
         std::cout << "\nLibraries used:\n";
@@ -2521,7 +2526,7 @@ E_SBFSPOT getInverterData(InverterData *device, unsigned long command, unsigned 
                                 {
                                     mppt new_mppt;
                                     new_mppt.Pdc(value);
-                                    device->mpp.insert(std::make_pair((uint8_t)cls, new_mppt));
+                                    device->mpp.insert(std::make_pair(cls, new_mppt));
                                 }
 
                                 debug_watt((std::string("SPOT_PDC") + std::to_string(cls)).c_str(), value, datetime);
@@ -2540,7 +2545,7 @@ E_SBFSPOT getInverterData(InverterData *device, unsigned long command, unsigned 
                                 {
                                     mppt new_mppt;
                                     new_mppt.Udc(value);
-                                    device->mpp.insert(std::make_pair((uint8_t)cls, new_mppt));
+                                    device->mpp.insert(std::make_pair(cls, new_mppt));
                                 }
 
                                 debug_volt((std::string("SPOT_UDC") + std::to_string(cls)).c_str(), value, datetime);
@@ -2557,7 +2562,7 @@ E_SBFSPOT getInverterData(InverterData *device, unsigned long command, unsigned 
                                 {
                                     mppt new_mppt;
                                     new_mppt.Idc(value);
-                                    device->mpp.insert(std::make_pair((uint8_t)cls, new_mppt));
+                                    device->mpp.insert(std::make_pair(cls, new_mppt));
                                 }
 
                                 debug_amp((std::string("SPOT_IDC") + std::to_string(cls)).c_str(), value, datetime);
@@ -2994,8 +2999,8 @@ void resetInverterData(InverterData *inv)
     inv->MeteringGridMsTotWIn = 0;
     inv->MeteringGridMsTotWOut = 0;
     inv->hasBattery = false;
-    inv->mpp.insert(std::make_pair((uint8_t)1, mppt(0, 0, 0)));
-    inv->mpp.insert(std::make_pair((uint8_t)2, mppt(0, 0, 0)));
+    inv->mpp.insert(std::make_pair(1, mppt(0, 0, 0)));
+    inv->mpp.insert(std::make_pair(2, mppt(0, 0, 0)));
 }
 
 E_SBFSPOT setDeviceData(InverterData *inv, LriDef lri, uint16_t cmd, Rec40S32 &data)

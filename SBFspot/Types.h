@@ -138,6 +138,7 @@ struct Config
     bool    settime;                // -settime     Set plant time
     bool    settime2;               // -settime2    Set plant time of V2.1.0 as mentioned in #442 (Failed to get current plant time)
     bool    mqtt;                   // -mqtt        Publish spot data to mqtt broker
+    bool    mqttInstallerEvents;    // -mqttevents  Fetch today's installer events and publish via MQTT (no DB write)
     bool    decode_file;            // -decode      Undocumented
 };
 

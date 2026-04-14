@@ -37,6 +37,8 @@ DISCLAIMER:
 #include "SBFspot.h"
 #include <boost/algorithm/string.hpp>
 #include "mppt.h"
+#include <fstream>
+#include <sstream>
 
 MqttExport::MqttExport(const Config& config)
     : m_config(config)
@@ -294,6 +296,140 @@ int MqttExport::exportInverterData(const std::vector<InverterData>& inverterData
     return rc;
 }
 
+int MqttExport::exportEventData(InverterData* const* const inverters, TagDefs& tagdefs)
+{
+    int rc = 0;
+    const uint32_t MAX_INV = 20;
+
+    for (uint32_t i = 0; inverters[i] != NULL && i < MAX_INV; i++)
+    {
+        const InverterData* inv = inverters[i];
+
+        if (inv->eventData.empty())
+            continue;
+
+        // ------------------------------------------------------------------
+        // State file: remembers the highest EntryID already published for
+        // this inverter, so we only fire MQTT messages for new events.
+        // Stored in outputPath as  mqtt_event_<serial>.state
+        // ------------------------------------------------------------------
+        std::string stateFilePath = std::string(m_config.outputPath) +
+                                    "/sbfspot_mqtt_event_" + std::to_string(inv->Serial) + ".state";
+
+        uint16_t lastEntryID = 0;
+        {
+            std::ifstream stateFile(stateFilePath);
+            if (stateFile.is_open())
+                stateFile >> lastEntryID;
+        }
+
+        uint16_t maxEntryID = lastEntryID;
+        bool publishError = false;
+
+        // Events are stored oldest-first; iterate forward so we publish in
+        // chronological order and the state file stays monotonically correct.
+        for (const auto& event : inv->eventData)
+        {
+            if (event.EntryID() <= lastEntryID)
+                continue; // Already published in a previous run
+
+            // Build OldValue / NewValue strings (same logic as db_SQLite_Export)
+            std::string oldval, newval;
+            switch (event.DataType())
+            {
+            case DT_STATUS:
+                oldval = tagdefs.getDesc(event.OldVal() & 0xFFFF);
+                newval = tagdefs.getDesc(event.NewVal() & 0xFFFF);
+                break;
+            case DT_STRING:
+                newval = event.EventStrPara();
+                break;
+            default:
+                oldval = std::to_string(event.OldVal());
+                newval = std::to_string(event.NewVal());
+                break;
+            }
+
+            // Build a JSON payload matching the EventData DB schema
+            std::ostringstream json;
+            json << "{"
+                 << "\"EntryID\":"       << event.EntryID()                                        << m_config.mqtt_item_delimiter
+                 << "\"TimeStamp\":\""   << escapeJson(strftime_t(m_config.DateTimeFormat, event.DateTime())) << "\"" << m_config.mqtt_item_delimiter
+                 << "\"EventCode\":"     << event.EventCode()                                      << m_config.mqtt_item_delimiter
+                 << "\"EventType\":\""   << escapeJson(event.EventType())                          << "\"" << m_config.mqtt_item_delimiter
+                 << "\"Category\":\""    << escapeJson(event.EventCategory())                      << "\"" << m_config.mqtt_item_delimiter
+                 << "\"EventGroup\":\""  << escapeJson(tagdefs.getDesc(event.Group()))             << "\"" << m_config.mqtt_item_delimiter
+                 << "\"Tag\":\""         << escapeJson(event.EventDescription())                   << "\"" << m_config.mqtt_item_delimiter
+                 << "\"OldValue\":\""    << escapeJson(oldval)                                     << "\"" << m_config.mqtt_item_delimiter
+                 << "\"NewValue\":\""    << escapeJson(newval)                                     << "\"" << m_config.mqtt_item_delimiter
+                 << "\"UserGroup\":\""   << escapeJson(tagdefs.getDesc(event.UserGroupTagID()))    << "\""
+                 << "}";
+
+            // Event topic: configured topic with /event appended.
+            // Honour the same {plantname} and {serial} substitutions as spot data.
+            std::string eventTopic = m_config.mqtt_topic + "/event";
+            boost::replace_first(eventTopic, "{plantname}", m_config.plantname);
+            boost::replace_first(eventTopic, "{serial}",    std::to_string(inv->Serial));
+
+            // Build mosquitto_pub command line reusing the configured args.
+            // The {message} placeholder in mqtt_publish_args carries the payload.
+#if defined(_WIN32)
+            std::string cmd = "\"\"" + m_config.mqtt_publish_exe + "\" " +
+                              m_config.mqtt_publish_args + "\"";
+#else
+            std::string cmd = m_config.mqtt_publish_exe + " " + m_config.mqtt_publish_args;
+            // On Linux the message value must be in single quotes
+            boost::replace_all(cmd, "\"", "'");
+#endif
+            boost::replace_first(cmd, "{host}",      m_config.mqtt_host);
+            boost::replace_first(cmd, "{port}",      m_config.mqtt_port);
+            boost::replace_first(cmd, "{topic}",     eventTopic);
+            boost::replace_first(cmd, "{plantname}", m_config.plantname);
+            boost::replace_first(cmd, "{serial}",    std::to_string(inv->Serial));
+            boost::replace_first(cmd, "{{message}}", json.str());
+
+            if (VERBOSE_NORMAL)
+                std::cout << "MQTT Event: Publishing EntryID " << event.EntryID()
+                          << " (category: " << event.EventCategory()
+                          << ") to " << eventTopic << std::endl;
+
+            int sys_rc = ::system(cmd.c_str());
+            if (sys_rc != 0)
+            {
+                std::cout << "MQTT: Failed to publish event EntryID " << event.EntryID()
+                          << " - mosquitto client installed?" << std::endl;
+                rc = sys_rc;
+                publishError = true;
+                break; // Stop here; state file will reflect last successful EntryID
+            }
+
+            if (event.EntryID() > maxEntryID)
+                maxEntryID = event.EntryID();
+        }
+
+        // Persist the new high-water mark only when at least one new event
+        // was successfully published (and no error wiped the run partway).
+        if (maxEntryID > lastEntryID && !publishError)
+        {
+            std::ofstream stateFile(stateFilePath, std::ios::trunc);
+            if (stateFile.is_open())
+                stateFile << maxEntryID;
+            else
+                std::cout << "MQTT: Warning - could not write state file: " << stateFilePath << std::endl;
+        }
+        else if (maxEntryID > lastEntryID)
+        {
+            // Partial success: persist progress so next run doesn't re-fire
+            // the events that did go through before the error.
+            std::ofstream stateFile(stateFilePath, std::ios::trunc);
+            if (stateFile.is_open())
+                stateFile << maxEntryID;
+        }
+    }
+
+    return rc;
+}
+
 std::string MqttExport::to_keyvalue(const std::string key, const std::string value) const
 {
     std::string key_value = m_config.mqtt_item_delimiter + m_config.mqtt_item_format;
@@ -318,4 +454,35 @@ time_t MqttExport::to_time_t(float time_f)
     localtm->tm_hour = (int)time_f;
     localtm->tm_min = (int)((time_f - (int)time_f) * 60);
     return std::mktime(localtm);
+}
+
+// Escapes special characters in a string for safe embedding in a JSON value.
+std::string MqttExport::escapeJson(const std::string& s) const
+{
+    std::string out;
+    out.reserve(s.size());
+    for (unsigned char c : s)
+    {
+        switch (c)
+        {
+        case '"':  out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\b': out += "\\b";  break;
+        case '\f': out += "\\f";  break;
+        case '\n': out += "\\n";  break;
+        case '\r': out += "\\r";  break;
+        case '\t': out += "\\t";  break;
+        default:
+            if (c < 0x20)
+            {
+                char buf[8];
+                snprintf(buf, sizeof(buf), "\\u%04x", c);
+                out += buf;
+            }
+            else
+                out += c;
+            break;
+        }
+    }
+    return out;
 }

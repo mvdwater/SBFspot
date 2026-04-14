@@ -46,5 +46,6 @@ DISCLAIMER:
 
 E_SBFSPOT ArchiveDayData(InverterData* const inverters[], time_t startTime);
 E_SBFSPOT ArchiveEventData(InverterData *inverters[], boost::gregorian::date startDate, unsigned long UserGroup);
+E_SBFSPOT ArchiveInstallerEventsToday(InverterData *inverters[]);
 E_SBFSPOT ArchiveMonthData(InverterData *invData[], tm *start_tm);
 E_SBFSPOT getMonthDataOffset(InverterData *inverters[]);
