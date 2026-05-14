@@ -1992,6 +1992,18 @@ int GetConfig(Config *cfg, bool isInclude)
                     cfg->mqtt_item_format = value;
                 else if (stricmp(key, "MQTT_Data") == 0)
                     cfg->mqtt_publish_data = value;
+                else if (stricmp(key, "MQTT_EventIgnore") == 0)
+                {
+                    // Comma-separated list of event codes to suppress from MQTT publishing
+                    // e.g. MQTT_EventIgnore=9003,29001
+                    std::vector<std::string> codes;
+                    boost::split(codes, value, boost::is_any_of(","));
+                    for (const auto& code : codes)
+                    {
+                        try { cfg->mqtt_event_ignore.push_back(std::stoul(boost::trim_copy(code))); }
+                        catch (...) { fprintf(stdout, CFG_InvalidValue, key, code.c_str()); }
+                    }
+                }
                 else if (stricmp(key, "MQTT_ItemDelimiter") == 0)
                 {
                     if (stricmp(value, "comma") == 0)
@@ -2187,6 +2199,12 @@ void ShowConfig(Config *cfg)
             "\nMQTT_PublisherArgs=" << cfg->mqtt_publish_args << \
             "\nMQTT_Data=" << cfg->mqtt_publish_data << \
             "\nMQTT_ItemFormat=" << cfg->mqtt_item_format;
+        if (!cfg->mqtt_event_ignore.empty())
+        {
+            std::cout << "\nMQTT_EventIgnore=";
+            for (size_t i = 0; i < cfg->mqtt_event_ignore.size(); i++)
+                std::cout << (i ? "," : "") << cfg->mqtt_event_ignore[i];
+        }
     }
 
     std::cout << "\nEnd of Config\n" << std::endl;

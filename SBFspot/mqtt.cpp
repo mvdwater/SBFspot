@@ -333,6 +333,21 @@ int MqttExport::exportEventData(InverterData* const* const inverters, TagDefs& t
             if (event.EntryID() <= lastEntryID)
                 continue; // Already published in a previous run
 
+            // Skip ignored event codes (configured via MQTT_EventIgnore)
+            if (!m_config.mqtt_event_ignore.empty() &&
+                std::find(m_config.mqtt_event_ignore.begin(),
+                          m_config.mqtt_event_ignore.end(),
+                          event.EventCode()) != m_config.mqtt_event_ignore.end())
+            {
+                if (VERBOSE_NORMAL)
+                    std::cout << "MQTT Event: Skipping ignored EventCode " << event.EventCode()
+                              << " (EntryID " << event.EntryID() << ")" << std::endl;
+                // Still advance the high-water mark so the state file stays current
+                if (event.EntryID() > maxEntryID)
+                    maxEntryID = event.EntryID();
+                continue;
+            }
+
             // Build OldValue / NewValue strings (same logic as db_SQLite_Export)
             std::string oldval, newval;
             switch (event.DataType())

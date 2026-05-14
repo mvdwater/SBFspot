@@ -118,6 +118,7 @@ struct Config
     std::string mqtt_publish_data;  // comma delimited list of spot data to publish (Timestamp,Serial,MeteringDyWhOut,GridMsTotW,...)
     std::string mqtt_item_format;   // default "{key}": {value}
     std::string mqtt_item_delimiter;// default comma
+    std::vector<uint32_t> mqtt_event_ignore; // event codes to suppress from MQTT publishing
 
     std::string decode_path;        // undocumented
 
